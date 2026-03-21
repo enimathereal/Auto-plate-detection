@@ -1,71 +1,51 @@
+import os
 import cv2
 import matplotlib.pyplot as plt
 from ultralytics import YOLO
-import numpy as np
 
-# 1. Chargement du modèle entraîné
-# Assure-toi que le fichier 'best.pt' est dans le même dossier
+# 1. Création du dossier de sortie
+output_dir = 'RESULTATS_PLAQUES'
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+    print(f"Dossier '{output_dir}' créé avec succès.")
+
+# 2. Chargement du modèle et de l'image
 model = YOLO('/content/drive/MyDrive/yolo_results/train/weights/best.pt') 
-
-# 2. Chargement de l'image de la voiture
-image_path = 'plaque-marocaine.jpg' # Remplace par ton nom de fichier
+image_path = 'plaque-marocaine.jpg'
 image = cv2.imread(image_path)
-if image is None:
-    print("Erreur : Impossible de charger l'image.")
-else:
-    # 3. Détection de la plaque avec YOLO
-    results = model.predict(source=image, conf=0.45) # Seuil de confiance à 45%
 
-    for result in results:
-        boxes = result.boxes.xyxy.cpu().numpy()
+# 3. Détection
+results = model.predict(source=image, conf=0.45)
+
+# Copie de l'image pour dessiner dessus sans modifier l'originale
+image_annotated = image.copy()
+
+for result in results:
+    boxes = result.boxes.xyxy.cpu().numpy()
+    
+    for i, box in enumerate(boxes):
+        x1, y1, x2, y2 = map(int, box)
         
-        for i, box in enumerate(boxes):
-            x1, y1, x2, y2 = map(int, box)
-            
-            # --- ÉTAPE 1 : RECADRAGE (CROP) ---
-            plate_crop = image[y1:y2, x1:x2]
-            
-            # --- ÉTAPE 2 : PRÉTRAITEMENT COMPLET (OPENCV) ---
-            # a. Niveaux de gris
-            gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
-            # b. Filtre bilatéral (réduction de bruit en gardant les bords nets)
-            blurred = cv2.bilateralFilter(gray, 11, 17, 17)
-            # c. Égalisation de contraste (CLAHE)
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(blurred)
-            # d. Binarisation Adaptative (Noir et Blanc pur)
-            thresh = cv2.adaptiveThreshold(clahe, 255, 
-                                          cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                          cv2.THRESH_BINARY, 11, 2)
-            # e. Nettoyage final
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-            cleaned = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        # --- RECADRAGE ET NETTOYAGE ---
+        plate_crop = image[y1:y2, x1:x2]
+        gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
+        thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
 
-            # --- ÉTAPE 3 : AFFICHAGE AVEC MATPLOTLIB ---
-            # On prépare une figure avec 3 zones pour ta présentation
-            plt.figure(figsize=(15, 5))
+        # --- ENREGISTREMENT DES FICHIERS ---
+        # Sauvegarde de la plaque nettoyée (Noir et Blanc)
+        filename_clean = os.path.join(output_dir, f'plaque_{i+1}_clean.jpg')
+        cv2.imwrite(filename_clean, thresh)
+        
+        # Sauvegarde de la plaque brute (Couleur)
+        filename_crop = os.path.join(output_dir, f'plaque_{i+1}_crop.jpg')
+        cv2.imwrite(filename_crop, plate_crop)
 
-            # Image originale avec le carré de détection
-            plt.subplot(1, 3, 1)
-            img_detected = image.copy()
-            cv2.rectangle(img_detected, (x1, y1), (x2, y2), (0, 255, 0), 10)
-            plt.imshow(cv2.cvtColor(img_detected, cv2.COLOR_BGR2RGB))
-            plt.title("1. Détection YOLOv8")
-            plt.axis('off')
+        # Dessiner le rectangle sur l'image globale
+        cv2.rectangle(image_annotated, (x1, y1), (x2, y2), (0, 255, 0), 5)
+        cv2.putText(image_annotated, f"Plaque {i+1}", (x1, y1-10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
-            # Zoom sur la plaque brute
-            plt.subplot(1, 3, 2)
-            plt.imshow(cv2.cvtColor(plate_crop, cv2.COLOR_BGR2RGB))
-            plt.title("2. Recadrage (Crop)")
-            plt.axis('off')
+# 4. Enregistrer l'image globale avec toutes les détections
+cv2.imwrite(os.path.join(output_dir, 'resultat_global.jpg'), image_annotated)
 
-            # Plaque nettoyée pour l'OCR
-            plt.subplot(1, 3, 3)
-            plt.imshow(cleaned, cmap='gray')
-            plt.title("3. Prétraitement Final (OCR Ready)")
-            plt.axis('off')
-
-            plt.tight_layout()
-            plt.show()
-
-            # Message de succès pour la console
-            print(f"Plaque n°{i+1} détectée et traitée avec succès.")
+print(f"Terminé ! Regarde dans le dossier '{output_dir}' à gauche dans Colab.")e et traitée avec succès.")
