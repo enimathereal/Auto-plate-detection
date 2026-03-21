@@ -1,36 +1,43 @@
 import cv2
-import numpy as np
+from ultralytics import YOLO
 
-def pre_process_plate(plate_crop):
-    # 1. Passage en niveaux de gris
-    # On simplifie l'image pour ne garder que l'intensité lumineuse
-    gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
+# 1. Charger ton modèle entraîné (remplace 'best.pt' par le chemin de ton fichier)
+model = YOLO('/content/drive/MyDrive/yolo_results/train/weights/best.pt') 
 
-    # 2. Réduction du bruit (Filtre Bilatéral)
-    # Lisse les surfaces mais garde les bords des chiffres très nets
-    blurred = cv2.bilateralFilter(gray, 11, 17, 17)
+# 2. Charger l'image de la voiture marocaine
+image_path = 'test_car.jpg'
+image = cv2.imread(image_path)
+h, w, _ = image.shape
 
-    # 3. Égalisation du contraste (CLAHE)
-    # Améliore la visibilité des chiffres même si la plaque est à l'ombre
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-    contrast = clahe.apply(blurred)
+# 3. Exécuter la détection
+results = model.predict(source=image, conf=0.5) # conf=0.5 pour éviter les faux positifs
 
-    # 4. Binarisation Adaptative
-    # Transforme l'image en Noir et Blanc pur (0 ou 255)
-    # Très efficace contre les reflets du soleil marocain sur le métal
-    thresh = cv2.adaptiveThreshold(contrast, 255, 
-                                  cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                  cv2.THRESH_BINARY, 11, 2)
+# 4. Parcourir les résultats détectés
+for result in results:
+    boxes = result.boxes.xyxy.cpu().numpy() # Récupère les coordonnées [x1, y1, x2, y2]
+    
+    for box in boxes:
+        # Extraire les coordonnées
+        x1, y1, x2, y2 = map(int, box)
+        
+        # --- ÉTAPE DE RECADRAGE (CROP) ---
+        # On découpe la plaque de l'image originale
+        plate_crop = image[y1:y2, x1:x2]
+        
+        # --- ÉTAPE DE PRÉTRAITEMENT (OPENCV) ---
+        gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.bilateralFilter(gray, 11, 17, 17)
+        thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        
+        # --- AFFICHAGE ---
+        # Dessiner le rectangle sur l'image d'origine pour la présentation
+        cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(image, "Plaque Maroc", (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-    # 5. Nettoyage Morphologique (Closing)
-    # Bouche les petits trous à l'intérieur des chiffres pour qu'ils soient pleins
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    cleaned = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        # Montrer la plaque recadrée et nettoyée
+        cv2.imshow('Plaque Recadree et Nettoyee', thresh)
 
-    return cleaned
-
-# --- Execution ---
-plaque_recadree = cv2.imread('votre_crop_yolo.jpg')
-image_finale = pre_process_plate(plaque_recadree)
-cv2.imshow('Plaque Prete pour OCR', image_finale)
+# Afficher l'image finale avec la détection
+cv2.imshow('Detection YOLOv8', image)
 cv2.waitKey(0)
+cv2.destroyAllWindows()
