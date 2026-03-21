@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['Licence plate']
+
+roboflow:
+  workspace: amines-workspace-z47by
+  project: my-first-project-kmgae
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/amines-workspace-z47by/my-first-project-kmgae/dataset/1
