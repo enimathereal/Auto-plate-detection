@@ -1,6 +1,6 @@
-train: ../train/images
-val: ../valid/images
-test: ../test/images
+train: /content/drive/MyDrive/dataset/train
+val: /content/drive/MyDrive/dataset/valid
+test: /content/drive/MyDrive/dataset/test
 
 nc: 1
 names: ['Licence plate']
