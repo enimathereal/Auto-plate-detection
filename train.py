@@ -8,4 +8,4 @@ model = YOLO('yolov8n.pt')
 # data='data.yaml' pointe vers notre fichier de configuration Roboflow
 # epochs=50 signifie que le modèle va s'entraîner 50 fois sur tout le dataset
 # imgsz=640 est la taille des images pour le modele
-results = model.train(data='data.yaml', epochs=50, imgsz=640)
+results = model.train(data='/content/Auto-plate-detection/data.yaml', epochs=50, imgsz=640)
