@@ -1,89 +1,57 @@
 import cv2
-import numpy as np
-from ultralytics import YOLO
-import easyocr
-import re
-import os
 from datetime import datetime
+from detection import PlateDetector
+from ocr import PlateReader
 
-class RadarMarocPro:
-    def __init__(self, model_yolo):
-        print("[INFO] Initialisation du système Radar Pro...")
-        # 1. Détecteur ultra-rapide
-        self.detector = YOLO(model_yolo)
-        # 2. Lecteur OCR Multilingue (GPU activé si disponible)
-        self.reader = easyocr.Reader(['ar', 'en'], gpu=True)
-        # 3. Dictionnaire de correction contextuelle
-        self.corrections = {'١': 'و', '1': 'و', '9': 'و', '5': 'و', '0': 'د', 'ا': 'أ'}
+def main():
+    print("[INFO] Lancement du Radar Pro (Architecture Modulaire)...")
+    
+    # --- 1. CONFIGURATION DES CHEMINS ---
+    chemin_yolo = '/content/drive/MyDrive/yolo_results/train/weights/best.pt'
+    chemin_image = 'plaque-marocaine.jpg' 
+    save_name = 'resultat_radar.jpg'
+    
+    # --- 2. INITIALISATION DES MODULES ---
+    detector = PlateDetector(chemin_yolo)
+    reader = PlateReader()
+    
+    # Dictionnaire pour éviter le bug des "??" sur l'image avec OpenCV
+    affichage_latin = {'أ': 'A', 'ب': 'B', 'ت': 'T', 'ج': 'J', 'د': 'D', 'ه': 'H', 'و': 'W'}
 
-    def preprocess_plate(self, plate_crop):
-        """ Amélioration d'image type 'Super-Resolution' """
-        # Agrandissement cubique pour redonner du détail aux pixels
-        img = cv2.resize(plate_crop, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # --- 3. LECTURE DE L'IMAGE ---
+    img = cv2.imread(chemin_image)
+    if img is None:
+        print("❌ Erreur : Image introuvable.")
+        return
+
+    # --- 4. DÉTECTION (YOLO) ---
+    crops, coords = detector.detect(img)
+    
+    if not crops:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] DÉTECTION : Aucune plaque détectée")
+        return
+
+    # --- 5. LECTURE (OCR) ET AFFICHAGE ---
+    for crop, (x1, y1, x2, y2) in zip(crops, coords):
         
-        # CLAHE : Égalisation adaptative de l'histogramme pour les reflets
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8)).apply(gray)
+        # Appel de ton fichier ocr.py
+        matricule_officiel, serie, lettre, region = reader.read_plate(crop)
         
-        # Débruitage bilatéral (préserve les bords des chiffres)
-        refined = cv2.bilateralFilter(clahe, 9, 75, 75)
-        return refined
-
-    def ocr_segmentation(self, plate_refined):
-        """ Découpage intelligent par zones sémantiques """
-        h, w = plate_refined.shape
+        # Traduction visuelle juste pour le dessin sur l'image
+        lettre_visuelle = affichage_latin.get(lettre, lettre)
+        matricule_dessin = f"{serie} | {lettre_visuelle} | {region}"
         
-        # Définition des zones (Ratios officiels des plaques marocaines)
-        z_gauche = plate_refined[:, :int(w * 0.48)]
-        z_milieu = plate_refined[:, int(w * 0.48):int(w * 0.78)]
-        z_droite = plate_refined[:, int(w * 0.78):]
-
-        # Lecture ciblée avec contraintes (Allowlists)
-        res_g = self.reader.readtext(z_gauche, allowlist='0123456789', detail=0)
-        res_m = self.reader.readtext(z_milieu, detail=0)
-        res_d = self.reader.readtext(z_droite, allowlist='0123456789', detail=0)
-
-        # Post-traitement Regex et Logique métier
-        serie = "".join(res_g) if res_g else "XXXXX"
-        if serie.startswith('0'): serie = '8' + serie[1:] # Correction 0/8 au début
+        # Dessin graphique
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 4)
+        cv2.putText(img, matricule_dessin, (x1, y1-15), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
         
-        lettre_raw = "".join(res_m) if res_m else "و"
-        # On ne garde que l'Arabe et on applique le dictionnaire de fautes
-        lettre = re.sub(r'[^\u0600-\u06FF]', '', lettre_raw)
-        if not lettre: lettre = self.corrections.get(lettre_raw[0], "و") if lettre_raw else "و"
-        
-        region = "".join(res_d) if res_d else "6"
-        if region == "5": region = "6" # Correction Casablanca Anfa
+        # TON PRINT ORIGINAL (Intact)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] DÉTECTION : {matricule_officiel}")
 
-        return f"{serie} | {lettre} | {region}"
+    # --- 6. SAUVEGARDE ---
+    cv2.imwrite(save_name, img)
+    print(f"✅ Image sauvegardée sous '{save_name}'")
 
-    def run(self, image_path, save_res=True):
-        img = cv2.imread(image_path)
-        if img is None: return print("❌ Erreur : Image introuvable.")
-
-        # Inférence YOLO (Détection)
-        results = self.detector.predict(img, conf=0.5, verbose=False)
-        
-        for result in results:
-            for box in result.boxes.xyxy.cpu().numpy():
-                x1, y1, x2, y2 = map(int, box)
-                plate_crop = img[y1:y2, x1:x2]
-                
-                # Pipeline de lecture
-                refined = self.preprocess_plate(plate_crop)
-                matricule = self.ocr_segmentation(refined)
-                
-                # Affichage graphique 'Radar'
-                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 4)
-                cv2.putText(img, matricule, (x1, y1-15), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
-                
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] DÉTECTION : {matricule}")
-
-        if save_res:
-            cv2.imwrite('resultat_radar.jpg', img)
-            print("✅ Image sauvegardée sous 'resultat_radar.jpg'")
-
-# --- LANCEMENT ---
-radar = RadarMarocPro('/content/drive/MyDrive/yolo_results/train/weights/best.pt')
-radar.run('plaque-marocaine.jpg')
+if __name__ == "__main__":
+    main()
